@@ -1,5 +1,7 @@
 import praw
 import json
+from nba_api.stats.endpoints import commonplayerinfo
+from nba_api.stats.static import players
 
 # Load the configuration from the JSON file
 with open('config.json') as config_file:
@@ -14,6 +16,45 @@ reddit_instance = praw.Reddit(
     user_agent=config['user_agent']
 )
 
+# Function to get player stats using nba_api
+def get_player_stats(player_name):
+    nba_players = players.get_players()
+    player = next((player for player in nba_players if player['full_name'] == player_name), None)
+    if player:
+        player_id = player['id']
+        player_info = commonplayerinfo.CommonPlayerInfo(player_id=player_id)
+        stats = player_info.player_headline_stats.get_dict()
+        if stats['data']:
+            stats = stats['data'][0]  # Get the first (and typically only) entry
+            return {
+                "PPG": stats[3],
+                "RPG": stats[4],
+                "APG": stats[5]
+            }
+    return "Stats not available."
+
+
+players_to_check = ["Stephen Curry", "Draymond Green", "Andrew Wiggins"]
+
+# Get the top 25 posts in the last week
+subreddit = reddit_instance.subreddit("warriors")
+top_25_submissions = subreddit.top(limit=25, time_filter="week")
+
+for submission in top_25_submissions:
+    submission.comments.replace_more(limit=0)
+    comments = submission.comments.list()
+
+    for comment in comments:
+        for player in players_to_check:
+            if player in comment.body:
+                stats = get_player_stats(player)
+                if stats != "Stats not available.":
+                    reply_text = f"{player} Stats: PPG: {stats['PPG']}, RPG: {stats['RPG']}, APG: {stats['APG']}"
+                else:
+                    reply_text = f"Stats for {player} are not available."
+                comment.reply(reply_text)
+                print(f"I'm a bot and I just replied to comment {comment.id} with {player} stats.")
+
 # print(reddit_instance.user.me())
 
 # HOW TO GET TOP 25 POSTS IN THE LAST WEEK
@@ -26,10 +67,10 @@ reddit_instance = praw.Reddit(
 # subreddit = reddit_instance.subreddit("testingground4bots")
 # subreddit.submit(title="This is a test post", selftext="Hello Test.")
 
-submission = reddit_instance.submission("1e9ghv0")
-comments = submission.comments
+# submission = reddit_instance.submission("1e9ghv0")
+# comments = submission.comments
 
 # HOW TO COMMENT
-for comment in comments:
-    if "test my stuff" in comment.body:
-        comment.reply("reply.")
+# for comment in comments:
+#    if "test my stuff" in comment.body:
+#        comment.reply("reply.")
