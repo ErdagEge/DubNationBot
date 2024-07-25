@@ -27,7 +27,7 @@ Currently, the functions to fetch player stats and respond to comments are not y
 Contributions are welcome! Please fork the repository and create a pull request with your changes. For major changes, please open an issue to discuss what you would like to change.
 
 ## License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE.txt) file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 Thanks to the Golden State Warriors community for their support and enthusiasm.
