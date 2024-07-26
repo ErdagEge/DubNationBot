@@ -1,97 +1,113 @@
 import praw
 import json
+import os
+import logging
 import pandas as pd
 from nba_api.stats.endpoints import commonplayerinfo, commonteamroster
 from nba_api.stats.static import players, teams
 
-# Load the configuration from the JSON file
-with open('config.json') as config_file:
-    config = json.load(config_file)
-
-# Initialize the Reddit instance with the configuration data
-reddit_instance = praw.Reddit(
-    username=config['username'],
-    password=config['password'],
-    client_id=config['client_id'],
-    client_secret=config['client_secret'],
-    user_agent=config['user_agent']
-)
-
-# getting all the NBA teams
-nba_teams = teams.get_teams()
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-# Getting the roster of a specific team
+def load_config(file_path):
+    try:
+        with open(file_path) as config_file:
+            return json.load(config_file)
+    except FileNotFoundError:
+        logging.error(f"Configuration file {file_path} not found.")
+        return None
+    except json.JSONDecodeError:
+        logging.error(f"Error decoding JSON from the configuration file {file_path}.")
+        return None
+
+
+def initialize_reddit(config):
+    try:
+        return praw.Reddit(
+            username=config['username'],
+            password=config['password'],
+            client_id=config['client_id'],
+            client_secret=config['client_secret'],
+            user_agent=config['user_agent']
+        )
+    except Exception as e:
+        logging.error(f"Error initializing Reddit instance: {e}")
+        return None
+
+
 def get_team_roster(team_id):
-    roster = commonteamroster.CommonTeamRoster(team_id=team_id)
-    return roster.get_data_frames()[0]
+    try:
+        roster = commonteamroster.CommonTeamRoster(team_id=team_id)
+        return roster.get_data_frames()[0]
+    except Exception as e:
+        logging.error(f"Error fetching team roster: {e}")
+        return None
 
 
-# Getting team id for the Golden State Warriors
-warriors_id = [team['id'] for team in nba_teams if team['full_name'] == 'Golden State Warriors'][0]
-
-# Fetch the roster for Golden State Warriors
-warriors_roster = get_team_roster(warriors_id)
-
-# Get the players name
-warriors_players = warriors_roster['PLAYER'].tolist()
-
-
-# Function to get player stats using nba_api
 def get_player_stats(player_name):
-    nba_players = players.get_players()
-    selected_player = next((selected_player for selected_player in nba_players if selected_player['full_name'] == player_name), None)
-    if selected_player:
-        player_id = selected_player['id']
-        player_info = commonplayerinfo.CommonPlayerInfo(player_id=player_id)
-        selected_stats = player_info.player_headline_stats.get_dict()
-        if selected_stats['data']:
-            selected_stats = selected_stats['data'][0]  # Get the first entry
-            return {
-                "PPG": selected_stats[3],
-                "RPG": selected_stats[4],
-                "APG": selected_stats[5]
-            }
-    return "Stats not available."
+    try:
+        nba_players = players.get_players()
+        selected_player = next((p for p in nba_players if p['full_name'] == player_name), None)
+        if selected_player:
+            player_id = selected_player['id']
+            player_info = commonplayerinfo.CommonPlayerInfo(player_id=player_id)
+            selected_stats = player_info.player_headline_stats.get_dict()
+            if selected_stats['data']:
+                selected_stats = selected_stats['data'][0]
+                return {
+                    "PPG": selected_stats[3],
+                    "RPG": selected_stats[4],
+                    "APG": selected_stats[5]
+                }
+        return "Stats not available."
+    except Exception as e:
+        logging.error(f"Error fetching player stats: {e}")
+        return "Stats not available."
 
 
-# Get the top 25 posts in the last week
-subreddit = reddit_instance.subreddit("warriors")
-top_25_submissions = subreddit.top(limit=25, time_filter="week")
+def main():
+    config = load_config('config.json')
+    if not config:
+        return
 
-for submission in top_25_submissions:
-    submission.comments.replace_more(limit=0)
-    comments = submission.comments.list()
+    reddit_instance = initialize_reddit(config)
+    if not reddit_instance:
+        return
 
-    for comment in comments:
-        for player in warriors_players:
-            if player in comment.body:
-                stats = get_player_stats(player)
-                if stats != "Stats not available.":
-                    reply_text = f"{player} Stats: PPG: {stats['PPG']}, RPG: {stats['RPG']}, APG: {stats['APG']}"
-                else:
-                    reply_text = f"Stats for {player} are not available."
-                comment.reply(reply_text)
-                print(f"Just replied to comment {comment.id} with {player} stats.")
+    nba_teams = teams.get_teams()
+    warriors_id = next((team['id'] for team in nba_teams if team['full_name'] == 'Golden State Warriors'), None)
+    if not warriors_id:
+        logging.error("Golden State Warriors team ID not found.")
+        return
 
-print(warriors_players)
+    warriors_roster = get_team_roster(warriors_id)
+    if warriors_roster is None:
+        return
 
-# print(reddit_instance.user.me())
+    warriors_players = warriors_roster['PLAYER'].tolist()
 
-# HOW TO GET TOP 25 POSTS IN THE LAST WEEK
-# subreddit = reddit_instance.subreddit("warriors")
-# top_25_submissions = subreddit.top(limit=25, time_filter="week")
-# for submission in top_25_submissions:
-#    print(submission.title)
+    subreddit = reddit_instance.subreddit("warriors")
+    top_25_submissions = subreddit.top(limit=25, time_filter="week")
 
-# HOW TO POST A POST
-# subreddit = reddit_instance.subreddit("testingground4bots")
-# subreddit.submit(title="This is a test post", selftext="Hello Test.")
+    for submission in top_25_submissions:
+        submission.comments.replace_more(limit=0)
+        comments = submission.comments.list()
 
-# submission = reddit_instance.submission("1e9ghv0")
-# comments = submission.comments
+        for comment in comments:
+            for player in warriors_players:
+                if player in comment.body:
+                    stats = get_player_stats(player)
+                    if stats != "Stats not available.":
+                        reply_text = f"{player} Stats: PPG: {stats['PPG']}, RPG: {stats['RPG']}, APG: {stats['APG']}"
+                    else:
+                        reply_text = f"Stats for {player} are not available."
+                    try:
+                        comment.reply(reply_text)
+                        logging.info(f"Replied to comment {comment.id} with {player} stats.")
+                    except Exception as e:
+                        logging.error(f"Error replying to comment {comment.id}: {e}")
 
-# HOW TO COMMENT
-# for comment in comments:
-#    if "test my stuff" in comment.body:
-#        comment.reply("reply.")
+
+if __name__ == "__main__":
+    main()
