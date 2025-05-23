@@ -1,18 +1,22 @@
-import praw
-import json
-import os
 import logging
-import pandas as pd
-import re
-import time
-from nba_api.stats.endpoints import commonplayerinfo, commonteamroster
-from nba_api.stats.static import players, teams
-from praw.exceptions import APIException
+import os
+from config import load_config
+from nba_utils import get_team_roster, get_player_stats
+from reddit_bot import initialize_reddit, get_replied_comment_ids, save_replied_comment_ids, reply_to_comments
+from nba_api.stats.static import teams
 
-# ... [other functions unchanged for brevity] ...
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("bot.log"),
+        logging.StreamHandler()
+    ]
+)
 
 def main():
-    config = load_config('config.json')
+    config_path = os.getenv('DUBNATIONBOT_CONFIG', 'config.json')
+    config = load_config(config_path)
     if not config:
         return
 
@@ -32,45 +36,12 @@ def main():
 
     warriors_players = warriors_roster['PLAYER'].tolist()
     stats_cache = {}
-
     subreddit = reddit_instance.subreddit("warriors")
-    top_25_submissions = subreddit.top(limit=25, time_filter="week")
+    replied_comment_ids = get_replied_comment_ids()
 
-    replied_comment_ids = set()
-    if os.path.exists("replied_to.json"):
-        with open("replied_to.json", "r") as f:
-            replied_comment_ids = set(json.load(f))
+    reply_to_comments(subreddit, warriors_players, get_player_stats, replied_comment_ids, stats_cache)
 
-    for submission in top_25_submissions:
-        submission.comments.replace_more(limit=0)
-        comments = submission.comments.list()
+    save_replied_comment_ids(replied_comment_ids)
 
-        for comment in comments:
-            if comment.id in replied_comment_ids:
-                continue
-            for player in warriors_players:
-                pattern = re.compile(rf"\b{re.escape(player)}\b", re.IGNORECASE)
-                if pattern.search(comment.body):
-                    if player not in stats_cache:
-                        stats_cache[player] = get_player_stats(player)
-                    stats = stats_cache[player]
-                    if stats != "Stats not available.":
-                        reply_text = f"{player} Stats: PPG: {stats['PPG']}, RPG: {stats['RPG']}, APG: {stats['APG']}"
-                    else:
-                        reply_text = f"Stats for {player} are not available."
-                    try:
-                        comment.reply(reply_text)
-                        replied_comment_ids.add(comment.id)
-                        logging.info(f"Replied to comment {comment.id} with {player} stats.")
-                        time.sleep(10)  # Wait 10 seconds between replies
-                    except APIException as api_exc:
-                        logging.error(f"API error replying to comment {comment.id}: {api_exc}")
-                        if api_exc.error_type == "RATELIMIT":
-                            # Extract wait time from message, or default to 10 min
-                            time.sleep(600)
-                    except Exception as e:
-                        logging.error(f"Error replying to comment {comment.id}: {e}")
-
-    # Save replied comment ids
-    with open("replied_to.json", "w") as f:
-        json.dump(list(replied_comment_ids), f)
+if __name__ == "__main__":
+    main()
